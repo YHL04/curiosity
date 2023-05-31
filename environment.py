@@ -1,6 +1,7 @@
 
 
 import gym
+from gym.spaces import Discrete
 import random
 
 from utils import repeat_upsample
@@ -10,6 +11,10 @@ class SimpleEnv:
 
     def __init__(self, env_name):
         self.env = gym.make(env_name)
+        if type(self.env.action_space) == Discrete:
+            self.discrete = True
+        else:
+            self.discrete = False
 
     @property
     def state_size(self):
@@ -17,13 +22,19 @@ class SimpleEnv:
 
     @property
     def action_size(self):
-        return self.env.action_space.shape[0]
+        if self.discrete:
+            return self.env.action_space.n
+        else:
+            return self.env.action_space.shape[0]
 
     def reset(self):
         return self.env.reset()
 
     def step(self, action, bound=2):
-        return self.env.step(action * bound)
+        if not self.discrete:
+            action *= bound
+
+        return self.env.step(action)
 
     def render(self):
         self.env.render()
@@ -32,7 +43,8 @@ class SimpleEnv:
 class AtariEnv:
 
     def __init__(self, env_name, auto_start=True, training=True, no_op_max=50):
-        self.env = gym.make(env_name, render_mode="rgb_array")
+        self.env = gym.make(env_name)
+        self.discrete = True
         self.last_lives = 0
 
         self.auto_start = auto_start
@@ -42,8 +54,12 @@ class AtariEnv:
         self.no_op_max = no_op_max
 
     @property
+    def state_size(self):
+        return self.env.observation_space.shape
+
+    @property
     def action_size(self):
-        return self.env.action_space.shape[0]
+        return self.env.action_space.n
 
     def reset(self):
         if self.auto_start:
@@ -55,6 +71,7 @@ class AtariEnv:
             for i in range(random.randint(1, self.no_op_max)):
                 frame, _, _, _ = self.env.step(1)
 
+        frame = frame[::2, ::2, :]
         return frame
 
     def step(self, action):
@@ -73,12 +90,15 @@ class AtariEnv:
 
         self.last_lives = info["lives"]
 
+        frame = frame[::2, ::2, :]
         return frame, reward, terminal, life_lost
 
     def render(self, scale=3):
         """Called at each timestep to render"""
-        rgb = self.env.render("rgb_array")
-        upscaled = repeat_upsample(rgb, scale, scale)
-        viewer.imshow(upscaled)
+        pass
 
-        return upscaled
+        # self.env.render()
+        # upscaled = repeat_upsample(rgb, scale, scale)
+        # viewer.imshow(upscaled)
+
+        # return upscaled

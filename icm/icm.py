@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .model import FeedForward, ConvNet
+
 
 class ICM(nn.Module):
     """
@@ -18,57 +20,77 @@ class ICM(nn.Module):
 
     """
 
-    def __init__(self, state_size, action_size, d_model):
+    def __init__(self, state_size, action_size, d_model=128):
         super(ICM, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
         self.d_model = d_model
 
-        self.encoder = nn.Sequential(
-            nn.Linear(state_size, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, d_model),
-            nn.ReLU()
-        )
-        self.forward_net = nn.Sequential(
-            nn.Linear(d_model + action_size, 256),
-            nn.ReLU(),
-            nn.Linear(256, d_model)
-        )
-        self.inverse_net = nn.Sequential(
-            nn.Linear(d_model * 2, 256),
-            nn.ReLU(),
-            nn.Linear(256, action_size)
-        )
+        if type(state_size) == int:
+            self.encoder = FeedForward(state_size, d_model, d_model, n_layers=0)
+        elif type(state_size) == tuple:
+            self.encoder = ConvNet(channels=state_size[2], out_dim=d_model)
+
+        self.forward_net = FeedForward(d_model + action_size, d_model, d_model, n_layers=0)
+        self.inverse_net = FeedForward(d_model * 2, action_size, d_model, n_layers=0)
+
+    @torch.no_grad()
+    def get_intrinsic_reward(self, act, curr_state, next_state, intr_reward_strength=0.02):
+        if act.dtype == torch.int64:
+            act = F.one_hot(act, num_classes=self.action_size).float()
+
+        act = act.unsqueeze(0)
+        curr_enc = self.encoder(curr_state.unsqueeze(0))
+        next_enc = self.encoder(next_state.unsqueeze(0))
+
+        # Forward net
+        pred_next_enc = self.forward_net(torch.concat((act, curr_enc), dim=-1))
+
+        # Intrinsic Reward
+        intr_reward = 0.5 * F.mse_loss(pred_next_enc, next_enc, reduction='none')
+        intr_reward = intr_reward.mean(dim=-1)
+        intr_reward = torch.clamp(intr_reward_strength * intr_reward, 0, 1)
+
+        return intr_reward
 
     def forward(self, act, curr_state, next_state):
         """
+        Forward Intrinsic Curiosity Module for continuous action PPO
+
         Parameters:
             act: recorded action
             curr_state: state when action was taken
             next_state: state after action was taken
 
         Returns:
-            intr_reward: intrinsic reward
             inv_loss: loss of inverse net
             forw_loss: loss of forward net
 
         """
+        if act.dtype == torch.int64:
+            act = F.one_hot(act, num_classes=self.action_size).float()
+            discrete = True
+        else:
+            discrete = False
+
         curr_enc = self.encoder(curr_state)
         next_enc = self.encoder(next_state)
 
         # Inverse net
         pred_act = self.inverse_net(torch.concat((curr_enc, next_enc), dim=-1))
-        inv_loss = F.cross_entropy(pred_act, act, reduction='none').mean()
+
+        inv_loss = F.mse_loss(pred_act, act, reduction='none').mean()
 
         # Forward net
-        one_hot_act = F.one_hot(act, num_classes=self.action_size)
-        pred_next_enc = self.forward_net(torch.concat((one_hot_act.float(), curr_enc), dim=-1))
+        pred_next_enc = self.forward_net(torch.concat((act, curr_enc), dim=-1))
 
-        # Intrinsic Reward
+        # Forward Loss
         intr_reward = 0.5 * F.mse_loss(pred_next_enc, next_enc, reduction='none')
         intr_reward = intr_reward.mean(dim=-1)
-
-        # Forward loss
         forw_loss = intr_reward.mean()
-        return intr_reward, inv_loss, forw_loss
+
+        # Weighted loss
+        loss = 10 * (0.2 * forw_loss + 0.8 * inv_loss)
+
+        return loss, inv_loss, forw_loss
+
