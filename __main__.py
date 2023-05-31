@@ -20,6 +20,7 @@ def main(env_name="BreakoutDeterministic-v4",
          total_timesteps=100_000_000
          ):
 
+    # env = SimpleEnv(env_name)
     env = AtariEnv(env_name)
     # PPO not compatible with atari yet, but PPOICM is
     agent = PPOICM(env.state_size, env.action_size, env.discrete)

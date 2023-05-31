@@ -51,7 +51,7 @@ class ICM(nn.Module):
         intr_reward = intr_reward.mean(dim=-1)
         intr_reward = torch.clamp(intr_reward_strength * intr_reward, 0, 1)
 
-        return intr_reward
+        return intr_reward.squeeze()
 
     def forward(self, act, curr_state, next_state):
         """
