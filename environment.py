@@ -4,8 +4,6 @@ import gym
 from gym.spaces import Discrete
 import random
 
-from utils import repeat_upsample
-
 
 class SimpleEnv:
 
@@ -43,7 +41,7 @@ class SimpleEnv:
 class AtariEnv:
 
     def __init__(self, env_name, auto_start=True, training=True, no_op_max=50):
-        self.env = gym.make(env_name)
+        self.env = gym.make(env_name, render_mode="human")
         self.discrete = True
         self.last_lives = 0
 
@@ -65,7 +63,7 @@ class AtariEnv:
         if self.auto_start:
             self.fire = True
 
-        frame = self.env.reset()
+        frame, _ = self.env.reset()
 
         if not self.training:
             for i in range(random.randint(1, self.no_op_max)):
@@ -79,7 +77,7 @@ class AtariEnv:
             action = 1
             self.fire = False
 
-        frame, reward, terminal, info = self.env.step(action)
+        frame, reward, _, terminal, info = self.env.step(action)
 
         if info["lives"] < self.last_lives:
             life_lost = True
@@ -93,12 +91,7 @@ class AtariEnv:
         frame = frame[::2, ::2, :]
         return frame, reward, terminal, life_lost
 
-    def render(self, scale=3):
+    def render(self):
         """Called at each timestep to render"""
-        pass
+        self.env.render()
 
-        # self.env.render()
-        # upscaled = repeat_upsample(rgb, scale, scale)
-        # viewer.imshow(upscaled)
-
-        # return upscaled

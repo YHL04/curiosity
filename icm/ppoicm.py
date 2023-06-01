@@ -28,17 +28,18 @@ class PPOICM:
     render = True
     render_every_i = 10
 
-    def __init__(self, state_size, action_size, discrete):
+    def __init__(self, state_size, action_size, discrete, device="cuda"):
         self.state_size = state_size
         self.action_size = action_size
         self.discrete = discrete
+        self.device = device
 
         if type(state_size) == int:
-            self.actor = FeedForward(state_size, action_size, discrete=discrete)
-            self.critic = FeedForward(state_size, 1)
+            self.actor = FeedForward(state_size, action_size, discrete=discrete).to(self.device)
+            self.critic = FeedForward(state_size, 1).to(self.device)
         elif type(state_size) == tuple:
-            self.actor = ConvNet(3, action_size, discrete=discrete)
-            self.critic = ConvNet(3, 1)
+            self.actor = ConvNet(3, action_size, discrete=discrete).to(self.device)
+            self.critic = ConvNet(3, 1).to(self.device)
 
         self.actor_opt = Adam(self.actor.parameters(), lr=self.lr)
         self.critic_opt = Adam(self.critic.parameters(), lr=self.lr)
@@ -49,7 +50,7 @@ class PPOICM:
             self.cov_mat = torch.diag(self.cov_var)
 
         # icm
-        self.icm = ICM(state_size, action_size)
+        self.icm = ICM(state_size, action_size).to(self.device)
         self.icm_opt = Adam(self.icm.parameters(), lr=self.lr)
 
         # logging
@@ -71,7 +72,7 @@ class PPOICM:
         log_prob = dist.log_prob(action)
 
         # Return the sampled action and the log probability of that action in our distribution
-        return action.squeeze().detach().numpy(), log_prob.detach()
+        return action.squeeze().cpu().detach().numpy(), log_prob.detach()
 
     def compute_rtgs(self, batch_rews, batch_intr_rews):
         """Compute the Reward-To-Go of each timestep in a batch given the rewards"""
@@ -88,7 +89,7 @@ class PPOICM:
                 batch_rtgs.insert(0, discounted_reward)
 
         # Convert the rewards-to-go into a tensor
-        batch_rtgs = torch.tensor(batch_rtgs, dtype=torch.float32)
+        batch_rtgs = torch.tensor(batch_rtgs, dtype=torch.float32, device=self.device)
 
         return batch_rtgs
 
@@ -209,13 +210,13 @@ class PPOICM:
 
                 t += 1
 
-                action, log_prob = self.get_action(torch.tensor(obs, dtype=torch.float32))
+                action, log_prob = self.get_action(torch.tensor(obs, dtype=torch.float32, device=self.device))
                 next_obs, rew, done, _ = env.step(action)
 
                 # add intrinsic reward
-                intr_rew = self.icm.get_intrinsic_reward(act=torch.tensor(action),
-                                                         curr_state=torch.tensor(obs, dtype=torch.float32),
-                                                         next_state=torch.tensor(next_obs, dtype=torch.float32),
+                intr_rew = self.icm.get_intrinsic_reward(act=torch.tensor(action, device=self.device),
+                                                         curr_state=torch.tensor(obs, dtype=torch.float32, device=self.device),
+                                                         next_state=torch.tensor(next_obs, dtype=torch.float32, device=self.device),
                                                          intr_reward_strength=self.intr_reward_strength)
 
                 batch_obs.append(obs)
@@ -236,10 +237,10 @@ class PPOICM:
             batch_rews.append(ep_rews)
             batch_intr_rews.append(ep_intr_rews)
 
-        batch_obs = torch.tensor(np.array(batch_obs), dtype=torch.float32)
-        batch_next_obs = torch.tensor(np.array(batch_obs), dtype=torch.float32)
-        batch_acts = torch.tensor(np.array(batch_acts))
-        batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float32)
+        batch_obs = torch.tensor(np.array(batch_obs), dtype=torch.float32, device=self.device)
+        batch_next_obs = torch.tensor(np.array(batch_obs), dtype=torch.float32, device=self.device)
+        batch_acts = torch.tensor(np.array(batch_acts), device=self.device)
+        batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float32, device=self.device)
 
         batch_rtgs = self.compute_rtgs(batch_rews, batch_intr_rews)
 
